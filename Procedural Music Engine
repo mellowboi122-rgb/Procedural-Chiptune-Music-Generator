@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Procedural Music Engine</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial;
+      background: radial-gradient(circle at top, #0b1020, #05070d);
+      color: #e6ecff;
+      text-align: center;
+    }
+
+    h2 {
+      margin-top: 40px;
+      letter-spacing: 2px;
+    }
+
+    .panel {
+      margin: 40px auto;
+      width: 420px;
+      padding: 20px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      border: 1px solid rgba(120,160,255,0.15);
+    }
+
+    select, button {
+      width: 90%;
+      margin: 8px;
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .start { background:#3b82f6; color:white; }
+    .stop { background:#ef4444; color:white; }
+    .dl { background:#22c55e; color:white; }
+
+    .label {
+      font-size: 12px;
+      opacity: 0.7;
+      margin-top: 10px;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h2>PROCEDURAL VIDEO GAME MUSIC ENGINE</h2>
+
+<div class="panel">
+
+  <div class="label">VIDEO GAME MUSIC</div>
+  <select id="vgGenre">
+    <option value="adventure">Adventure</option>
+    <option value="battle">Battle (FAST)</option>
+    <option value="chill">Chill</option>
+    <option value="dark">Dark</option>
+  </select>
+
+  <button class="start" onclick="startMusic()">START</button>
+  <button class="stop" onclick="stopMusic()">STOP</button>
+  <button class="dl" onclick="download()">DOWNLOAD</button>
+
+</div>
+
+<script>
+let ctx, dest, rec, chunks=[];
+let interval=null;
+let step=0;
+
+const VIDEO_GAME = {
+  adventure: { scale:[261.63,293.66,329.63,392.00,440.00], tempo:170, drums:0.6 },
+  dark:      { scale:[130.81,164.81,196.00,220.00,261.63], tempo:200, drums:0.4 },
+  chill:     { scale:[220.00,246.94,293.66,329.63,392.00], tempo:260, drums:0.2 },
+  battle:    { scale:[196.00,246.94,293.66,392.00,493.88], tempo:110, drums:0.95 }
+};
+
+const TONES = [
+  { wave:"sine", cutoff:700 },
+  { wave:"triangle", cutoff:1000 },
+  { wave:"sawtooth", cutoff:1300 },
+  { wave:"square", cutoff:900 }
+];
+
+let song = {};
+let baseTempo = 170;
+
+function pick(a){
+  return a[Math.floor(Math.random()*a.length)];
+}
+
+// 🎧 instrument tone
+function tone(f,t,d,profile,g){
+  const o=ctx.createOscillator();
+  const gn=ctx.createGain();
+  const fl=ctx.createBiquadFilter();
+
+  o.type=profile.wave;
+  o.frequency.value=f;
+
+  fl.type="lowpass";
+  fl.frequency.value=profile.cutoff + Math.random()*300;
+
+  gn.gain.setValueAtTime(g,t);
+  gn.gain.exponentialRampToValueAtTime(0.001,t+d);
+
+  o.connect(fl);
+  fl.connect(gn);
+  gn.connect(ctx.destination);
+  gn.connect(dest);
+
+  o.start(t);
+  o.stop(t+d);
+}
+
+// 🥁 drum
+function drum(t,intensity){
+  const o=ctx.createOscillator();
+  const g=ctx.createGain();
+
+  o.type="square";
+  o.frequency.value=60 + Math.random()*40;
+
+  g.gain.setValueAtTime(intensity,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.1);
+
+  o.connect(g);
+  g.connect(ctx.destination);
+  g.connect(dest);
+
+  o.start(t);
+  o.stop(t+0.1);
+}
+
+// 🎼 init
+function initSong(){
+  const vg = VIDEO_GAME[document.getElementById("vgGenre").value];
+
+  baseTempo = vg.tempo;
+
+  song = {
+    scale: vg.scale,
+    drums: vg.drums,
+    motif: Array.from({length:8},()=>pick(vg.scale)),
+    tone: pick(TONES)
+  };
+}
+
+// ▶ start
+async function startMusic(){
+  stopMusic();
+
+  ctx = new (window.AudioContext||window.webkitAudioContext)();
+  await ctx.resume();
+
+  dest = ctx.createMediaStreamDestination();
+
+  chunks=[];
+  rec = new MediaRecorder(dest.stream);
+  rec.ondataavailable=e=>chunks.push(e.data);
+  rec.start();
+
+  initSong();
+
+  step=0;
+
+  interval = setInterval(()=>{
+
+    const t = ctx.currentTime;
+    const note = song.motif[step % song.motif.length];
+
+    // 🥁 drums
+    if(step % 4 === 0 && Math.random()<song.drums){
+      drum(t, 0.3);
+    }
+
+    // 🎮 main music
+    tone(note/2,t,0.25,song.tone,0.25);
+    if(Math.random()<0.7) tone(note,t,0.2,song.tone,0.15);
+    if(Math.random()<0.2) tone(note*2,t,0.15,song.tone,0.1);
+
+    step++;
+
+  }, baseTempo);
+}
+
+// ⛔ stop
+function stopMusic(){
+  if(interval) clearInterval(interval);
+  interval=null;
+  if(ctx) ctx.close();
+}
+
+// 💾 download
+function download(){
+  if(!rec) return;
+
+  rec.stop();
+  rec.onstop=()=>{
+    const b=new Blob(chunks,{type:"audio/webm"});
+    const u=URL.createObjectURL(b);
+
+    const a=document.createElement("a");
+    a.href=u;
+    a.download="procedural_music.webm";
+    a.click();
+
+    chunks=[];
+  };
+}
+</script>
+
+</body>
+</html>
